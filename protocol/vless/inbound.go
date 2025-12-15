@@ -278,3 +278,7 @@ func (c *peekedConn) Read(p []byte) (n int, err error) {
 	c.readHead = true
 	return 1, nil
 }
+
+func (c *peekedConn) Upstream() any {
+	return c.Conn
+}
