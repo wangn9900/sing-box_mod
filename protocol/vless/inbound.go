@@ -176,17 +176,21 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata a
 		conn = tlsConn
 	}
 	if h.fallbackAddr.IsValid() {
-		bConn := bufio.NewCachedConn(conn)
-		head, err := bConn.Peek(1)
+		var head [1]byte
+		_, err := conn.Read(head[:])
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			return
 		}
+		pConn := &peekedConn{
+			Conn: conn,
+			head: head[0],
+		}
 		if head[0] != 0 {
-			h.fallbackConnection(ctx, bConn, metadata, onClose)
+			h.fallbackConnection(ctx, pConn, metadata, onClose)
 			return
 		}
-		conn = bConn
+		conn = pConn
 	}
 	h.userconns.Store(conn, metadata.User)
 	onClose = N.AppendClose(onClose, func(err error) {
@@ -255,4 +259,22 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 	metadata.InboundOptions = h.listener.ListenOptions().InboundOptions
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
 	(*Inbound)(h).NewConnectionEx(ctx, conn, metadata, onClose)
+}
+
+type peekedConn struct {
+	net.Conn
+	head     byte
+	readHead bool
+}
+
+func (c *peekedConn) Read(p []byte) (n int, err error) {
+	if c.readHead {
+		return c.Conn.Read(p)
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	p[0] = c.head
+	c.readHead = true
+	return 1, nil
 }
