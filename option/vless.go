@@ -6,6 +6,8 @@ type VLESSInboundOptions struct {
 	InboundTLSOptionsContainer
 	Multiplex *InboundMultiplexOptions `json:"multiplex,omitempty"`
 	Transport *V2RayTransportOptions   `json:"transport,omitempty"`
+	Flow      string                   `json:"flow,omitempty"`
+	Fallback  *ServerOptions           `json:"fallback,omitempty"`
 }
 
 type VLESSUser struct {
