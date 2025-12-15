@@ -37,15 +37,16 @@ var _ adapter.TCPInjectableInbound = (*Inbound)(nil)
 
 type Inbound struct {
 	inbound.Adapter
-	ctx       context.Context
-	router    adapter.ConnectionRouterEx
-	logger    logger.ContextLogger
-	listener  *listener.Listener
-	users     []option.VLESSUser
-	service   *vless.Service[int]
-	tlsConfig tls.ServerConfig
-	transport adapter.V2RayServerTransport
-	userconns sync.Map
+	ctx          context.Context
+	router       adapter.ConnectionRouterEx
+	logger       logger.ContextLogger
+	listener     *listener.Listener
+	users        []option.VLESSUser
+	service      *vless.Service[int]
+	tlsConfig    tls.ServerConfig
+	transport    adapter.V2RayServerTransport
+	userconns    sync.Map
+	fallbackAddr M.Socksaddr
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSInboundOptions) (adapter.Inbound, error) {
@@ -55,6 +56,9 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		router:  uot.NewRouter(router, logger),
 		logger:  logger,
 		users:   options.Users,
+	}
+	if options.Fallback != nil {
+		inbound.fallbackAddr = options.Fallback.Build()
 	}
 	var err error
 	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
@@ -151,6 +155,14 @@ func (h *Inbound) Close() error {
 	)
 }
 
+func (h *Inbound) fallbackConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	metadata.Inbound = h.Tag()
+	metadata.InboundType = h.Type()
+	metadata.Destination = h.fallbackAddr
+	h.logger.InfoContext(ctx, "fallback connection to ", h.fallbackAddr)
+	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
+}
+
 func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if h.tlsConfig != nil && h.transport == nil {
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
@@ -162,6 +174,19 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata a
 			return
 		}
 		conn = tlsConn
+	}
+	if h.fallbackAddr.IsValid() {
+		bConn := bufio.NewCachedConn(conn)
+		head, err := bConn.Peek(1)
+		if err != nil {
+			N.CloseOnHandshakeFailure(conn, onClose, err)
+			return
+		}
+		if head[0] != 0 {
+			h.fallbackConnection(ctx, bConn, metadata, onClose)
+			return
+		}
+		conn = bConn
 	}
 	h.userconns.Store(conn, metadata.User)
 	onClose = N.AppendClose(onClose, func(err error) {
