@@ -1,6 +1,6 @@
 module github.com/sagernet/sing-box
 
-go 1.23
+go 1.24.7
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.14.0
@@ -142,3 +142,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
+
+replace github.com/anytls/sing-anytls => github.com/wangn9900/sing-anytls v0.0.0-20260101122157-d972c93a8a35
